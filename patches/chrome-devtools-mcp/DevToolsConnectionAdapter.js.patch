@@ -1,0 +1,17 @@
+--- a/build/src/DevToolsConnectionAdapter.js
++++ b/build/src/DevToolsConnectionAdapter.js
+@@ -27,6 +27,14 @@
+         if (!session) {
+             throw new Error('Unknown session ' + sessionId);
+         }
++        // rebrowser-patches: block Runtime.enable to prevent CDP detection.
++        // The DevTools Universe models call Runtime.enable on their own CDP session,
++        // which leaks as a detectable CDP marker. We suppress it here just like
++        // rebrowser-patches suppresses it inside Puppeteer's FrameManager.
++        if (method === 'Runtime.enable' && process.env['REBROWSER_PATCHES_RUNTIME_FIX_MODE'] !== '0') {
++            process.env['REBROWSER_PATCHES_DEBUG'] && console.error('[rebrowser-patches][DevToolsConnection] Blocked Runtime.enable on session', sessionId);
++            return Promise.resolve({ result: {} });
++        }
+         // Rolled protocol version between puppeteer and DevTools doesn't necessarily match
+         /* eslint-disable @typescript-eslint/no-explicit-any */
+         return session

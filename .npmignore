@@ -1,0 +1,13 @@
+# Development / test files
+cdp-alert.mjs
+package-lock.json
+
+# Git
+.git/
+.gitignore
+
+# Editor
+.vscode/
+
+# Node
+node_modules/
