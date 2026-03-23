@@ -1,16 +1,7 @@
 {
-  "name": "chrome-devtools-mcp-rebrowser",
-  "version": "1.0.0",
+  "name": "@liqi0816/chrome-devtools-mcp-rebrowser",
+  "version": "1.0.1",
   "description": "Chrome DevTools MCP server with rebrowser anti-detection patches — undetectable by Cloudflare, DataDome, and other anti-bot systems",
-  "type": "module",
-  "main": "launch.mjs",
-  "bin": {
-    "chrome-devtools-mcp-rebrowser": "./launch.mjs"
-  },
-  "scripts": {
-    "start": "node launch.mjs",
-    "postinstall": "node postinstall.mjs"
-  },
   "keywords": [
     "mcp",
     "chrome-devtools",
@@ -20,8 +11,21 @@
     "cdp",
     "model-context-protocol"
   ],
-  "author": "LI, Qi (https://github.com/liqi0816)",
+  "homepage": "https://github.com/liqi0816/chrome-devtools-mcp-rebrowser#readme",
+  "bugs": {
+    "url": "https://github.com/liqi0816/chrome-devtools-mcp-rebrowser/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liqi0816/chrome-devtools-mcp-rebrowser.git"
+  },
   "license": "MIT",
+  "author": "LI, Qi (https://github.com/liqi0816)",
+  "type": "module",
+  "main": "launch.mjs",
+  "bin": {
+    "chrome-devtools-mcp-rebrowser": "./launch.mjs"
+  },
   "files": [
     "launch.mjs",
     "postinstall.mjs",
@@ -29,9 +33,16 @@
     "LICENSE",
     "README.md"
   ],
+  "scripts": {
+    "postinstall": "node postinstall.mjs",
+    "start": "node launch.mjs"
+  },
   "dependencies": {
     "chrome-devtools-mcp": "^0.20.3",
     "puppeteer-core": "^24.39.1",
     "rebrowser-patches": "^1.0.19"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

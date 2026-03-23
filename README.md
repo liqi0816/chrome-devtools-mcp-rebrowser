@@ -2,6 +2,8 @@
 
 This project wraps [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) with [rebrowser-patches](https://github.com/rebrowser/rebrowser-patches) to make AI agents undetectable by anti-bot systems like Cloudflare and DataDome.
 
+![negative bot detection result](./are-you-a-bot.webp)
+
 ## 🤖 AI
 
 Yes, I used AI. I also committed the full conversations as the real design documents (`.ai-conversations/` - private submodule, ask me for access).
@@ -32,7 +34,7 @@ No cloning or manual setup needed. Just configure your MCP client:
       "command": "npx",
       "args": [
         "-y",
-        "chrome-devtools-mcp-rebrowser@latest",
+        "@liqi0816/chrome-devtools-mcp-rebrowser@latest",
         "--auto-connect",
         "--performance-crux=false",
         "--usage-statistics=false",
@@ -185,7 +187,6 @@ This is an acceptable tradeoff since `Runtime.enable` is the primary CDP detecti
 - Check that `DevToolsActivePort` file exists in Chrome's user data directory
 
 ### Patch fails with "FAILED" hunks
-- The `es5-iife` hunk failure is expected and harmless
 - If CJS/ESM hunks fail, the puppeteer-core version may have changed too much. Try adjusting the `--fuzz` value or manually applying the changes
 
 ### "emulateFocusedPage is not a function" (or similar)
