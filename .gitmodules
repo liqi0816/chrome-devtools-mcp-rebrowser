@@ -1,0 +1,4 @@
+[submodule ".ai-conversations"]
+	path = .ai-conversations
+	url = git@github.com:liqi0816/ai-conversations.git
+	branch = chrome-devtools-mcp-rebrowser

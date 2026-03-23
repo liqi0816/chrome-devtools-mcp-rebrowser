@@ -2,6 +2,14 @@
 
 This project wraps [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) with [rebrowser-patches](https://github.com/rebrowser/rebrowser-patches) to make AI agents undetectable by anti-bot systems like Cloudflare and DataDome.
 
+## 🤖 AI
+
+Yes, I used AI. I also committed the full conversations as the real design documents (`.ai-conversations/` - private submodule, ask me for access).
+
+They're private because I haven't scrubbed my file paths and trash talk, not because I'm hiding anything.
+
+Code is MIT. What license applies to human-AI conversation transcripts is an open question. Literally. Nobody knows yet.
+
 ## Quick Start
 
 ### Prerequisites
