@@ -38,9 +38,9 @@
     "start": "node launch.mjs"
   },
   "dependencies": {
-    "chrome-devtools-mcp": "^0.20.3",
-    "puppeteer-core": "^24.39.1",
-    "rebrowser-patches": "^1.0.19"
+    "chrome-devtools-mcp": "0.20.3",
+    "puppeteer-core": "24.39.1",
+    "rebrowser-patches": "1.0.19"
   },
   "publishConfig": {
     "access": "public"

@@ -65,12 +65,65 @@ function stripHunksFromPatch(patchContent, filterRe) {
   for (const line of lines) {
     // Each file section starts with "--- a/..."
     if (line.startsWith('--- a/')) {
-      const path = line.slice('--- a/'.length);
+      const path = line.slice('--- a/'.length).trim();
       skipping = filterRe.test(path);
     }
     if (!skipping) kept.push(line);
   }
   return kept.join('\n');
+}
+
+async function insertBeforeMarker(filePath, marker, snippet) {
+  const content = await readFile(filePath, 'utf8');
+
+  if (content.includes(snippet.trim())) {
+    return;
+  }
+
+  const index = content.indexOf(marker);
+  if (index === -1) {
+    throw new Error(`Could not find patch marker in ${filePath}`);
+  }
+
+  const updated = content.slice(0, index) + snippet + content.slice(index);
+  await writeFile(filePath, updated);
+}
+
+async function applyBrowserConnectionPatch(puppeteerCoreDir) {
+  const jsSnippet =
+    "    // rebrowser-patches: expose browser CDP session\n" +
+    "    _connection() {\n" +
+    "        return this.#connection;\n" +
+    "    }\n";
+
+  const targets = [
+    {
+      filePath: join(puppeteerCoreDir, 'lib', 'cjs', 'puppeteer', 'cdp', 'Browser.d.ts'),
+      marker: '    _createPageInContext(',
+      snippet: '    _connection(): Connection;\n',
+    },
+    {
+      filePath: join(puppeteerCoreDir, 'lib', 'cjs', 'puppeteer', 'cdp', 'Browser.js'),
+      marker: '    async _createPageInContext(',
+      snippet: jsSnippet,
+    },
+    {
+      filePath: join(puppeteerCoreDir, 'lib', 'esm', 'puppeteer', 'cdp', 'Browser.d.ts'),
+      marker: '    _createPageInContext(',
+      snippet: '    _connection(): Connection;\n',
+    },
+    {
+      filePath: join(puppeteerCoreDir, 'lib', 'esm', 'puppeteer', 'cdp', 'Browser.js'),
+      marker: '    async _createPageInContext(',
+      snippet: jsSnippet,
+    },
+  ];
+
+  for (const target of targets) {
+    await insertBeforeMarker(target.filePath, target.marker, target.snippet);
+  }
+
+  console.log('✔ Applied Browser._connection() compatibility patch');
 }
 
 /**
@@ -108,8 +161,9 @@ async function applyPatch(patchBin, targetDir, patchFile, { fuzz } = {}) {
     // "already applied" situation.
     const hasFailedHunks = /FAILED/i.test(err.stdout);
     const hasReversed = /Reversed \(or previously applied\) patch detected/i.test(err.stdout);
+    const hasIgnored = /Ignoring previously applied \(or reversed\) patch/i.test(err.stdout);
 
-    if (hasReversed && !hasFailedHunks) {
+    if ((hasReversed || hasIgnored) && !hasFailedHunks) {
       console.log(`✔ Patch already applied in ${targetDir} (skipped)`);
       return;
     }
@@ -148,8 +202,9 @@ async function main() {
   // 3. Apply rebrowser-patches to puppeteer-core (with fuzz for version tolerance)
   //    The upstream patch includes hunks for lib/es5-iife/ which is a bundled
   //    build that doesn't exist in every puppeteer-core release and doesn't
-  //    affect Node-side behaviour.  We strip those hunks so they can't cause
-  //    spurious failures.
+  //    affect Node-side behaviour. The Browser.* hunks are also stripped and
+  //    applied separately because their surrounding context changes across
+  //    patch-compatible Puppeteer releases.
   const rebrowserPatchFile = join(
     rebrowserPatchesDir,
     'patches',
@@ -158,7 +213,10 @@ async function main() {
   );
 
   const rawPatch = await readFile(rebrowserPatchFile, 'utf8');
-  const filteredPatch = stripHunksFromPatch(rawPatch, /^lib\/es5-iife\//);
+  const filteredPatch = stripHunksFromPatch(
+    rawPatch,
+    /^lib\/es5-iife\/|^lib\/(?:cjs|esm)\/puppeteer\/cdp\/Browser\.(?:d\.ts|js)$/,
+  );
 
   // Write the filtered patch to a temp file
   const tmpDir = await mkdtemp(join(tmpdir(), 'rebrowser-'));
@@ -168,6 +226,7 @@ async function main() {
   try {
     console.log('--- Applying rebrowser-patches to puppeteer-core (es5-iife stripped) ---');
     await applyPatch(patchBin, puppeteerCoreDir, filteredPatchFile, { fuzz: 10 });
+    await applyBrowserConnectionPatch(puppeteerCoreDir);
   } finally {
     // Clean up temp file
     await unlink(filteredPatchFile).catch(() => {});
