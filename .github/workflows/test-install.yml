@@ -1,0 +1,46 @@
+name: Test Install
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test-install:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install dependencies and run postinstall
+        run: npm install
+      - name: Verify postinstall succeeded
+        run: node -e "
+          const fs = require('fs');
+          const path = require('path');
+          const puppeteerCore = path.dirname(require.resolve('puppeteer-core/package.json'));
+          const browser = fs.readFileSync(path.join(puppeteerCore, 'lib/cjs/puppeteer/cdp/Browser.js'), 'utf8');
+          if (!browser.includes('_connection()')) {
+            console.error('Browser.js missing _connection() patch');
+            process.exit(1);
+          }
+          const execCtx = fs.readFileSync(path.join(puppeteerCore, 'lib/cjs/puppeteer/cdp/ExecutionContext.js'), 'utf8');
+          if (!execCtx.includes('rebrowser')) {
+            console.error('ExecutionContext.js missing rebrowser patch');
+            process.exit(1);
+          }
+          const cdmDir = path.dirname(require.resolve('chrome-devtools-mcp/package.json'));
+          const adapter = fs.readFileSync(path.join(cdmDir, 'build/src/DevToolsConnectionAdapter.js'), 'utf8');
+          if (!adapter.includes('Runtime.enable')) {
+            console.error('DevToolsConnectionAdapter.js missing Runtime.enable patch');
+            process.exit(1);
+          }
+          console.log('All patches verified successfully');
+          "

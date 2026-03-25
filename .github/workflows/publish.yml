@@ -1,27 +1,25 @@
 name: Publish to npm
-
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
 
 jobs:
+  test-install:
+    uses: ./.github/workflows/test-install.yml
+
   publish:
+    needs: test-install
     runs-on: ubuntu-latest
     permissions:
-      id-token: write  # Required for OIDC
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: false
-
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-
-      - run: npm ci
-      - run: npm run build --if-present
-      - run: npm test --if-present
+          node-version: 24
+          registry-url: https://registry.npmjs.org
       - run: npm publish --provenance --access public

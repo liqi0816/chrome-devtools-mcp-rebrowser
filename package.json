@@ -24,7 +24,7 @@
   "type": "module",
   "main": "launch.mjs",
   "bin": {
-    "chrome-devtools-mcp-rebrowser": "./launch.mjs"
+    "chrome-devtools-mcp-rebrowser": "launch.mjs"
   },
   "files": [
     "launch.mjs",
@@ -39,7 +39,8 @@
   },
   "dependencies": {
     "chrome-devtools-mcp": "^0.20.3",
-    "puppeteer-core": "^24.39.1",
+    "diff": "^8.0.4",
+    "puppeteer-core": "^24.40.0",
     "rebrowser-patches": "^1.0.19"
   },
   "publishConfig": {
