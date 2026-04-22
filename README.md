@@ -18,7 +18,6 @@ Code is MIT. What license applies to human-AI conversation transcripts is an ope
 
 - **Node.js** ≥ 20.19.0 LTS
 - **Chrome** running with remote debugging enabled (go to `chrome://inspect/#remote-debugging`)
-- **Git** installed (provides `patch.exe` on Windows, needed for applying patches)
 
 ### Usage via `npx` (recommended)
 
@@ -83,7 +82,7 @@ Then configure the MCP server to use the local entry point:
 
 ## How It Works
 
-`chrome-devtools-mcp` is Google's official MCP server for Chrome DevTools. It bundles its own copy of Puppeteer (v24.39.1) internally. This project intercepts its `puppeteer.connect()` and `puppeteer.launch()` calls and redirects them through a separately installed, rebrowser-patched version of `puppeteer-core`.
+`chrome-devtools-mcp` is Google's official MCP server for Chrome DevTools. It bundles its own copy of Puppeteer internally. This project intercepts its `puppeteer.connect()` and `puppeteer.launch()` calls and redirects them through a separately installed, rebrowser-patched version of `puppeteer-core`.
 
 ### Architecture
 
@@ -91,7 +90,7 @@ Then configure the MCP server to use the local entry point:
 launch.mjs (entry point)
   │
   ├─ Imports patched puppeteer-core (node_modules/puppeteer-core)
-  │   └─ puppeteer-core@24.39.1 + rebrowser-patches applied
+  │   └─ puppeteer-core@24.40.0 + rebrowser-patches applied
   │
   ├─ Imports bundled puppeteer from chrome-devtools-mcp
   │   └─ node_modules/chrome-devtools-mcp/build/src/third_party/index.js
@@ -116,8 +115,16 @@ DevToolsConnectionAdapter.js (patched)
 ### Why the Monkey-Patching?
 
 - `chrome-devtools-mcp` bundles Puppeteer in a single rollup file (`third_party/index.js`), so you can't simply swap out `puppeteer-core` via `package.json`.
-- `rebrowser-puppeteer` (the drop-in replacement) is only available up to v24.8.1, but `chrome-devtools-mcp@0.20.3` requires Puppeteer v24.39.1 APIs (e.g., `page.emulateFocusedPage()`).
-- Solution: install `puppeteer-core@24.39.1` separately, apply `rebrowser-patches` to it, then redirect the bundled Puppeteer's calls through the patched version.
+- `rebrowser-puppeteer` (the drop-in replacement) is only available up to v24.8.1, but recent `chrome-devtools-mcp` releases require newer Puppeteer APIs (e.g., `page.emulateFocusedPage()` from v24.39+).
+- Solution: install a compatible `puppeteer-core` separately, apply `rebrowser-patches` to it, then redirect the bundled Puppeteer's calls through the patched version.
+
+### Why `puppeteer-core` and `rebrowser-patches` are pinned to exact versions
+
+You'll see `"puppeteer-core": "24.40.0"` and `"rebrowser-patches": "1.0.19"` (no caret) in `package.json`. This is deliberate — these two **must** move in lockstep:
+
+`rebrowser-patches` is a set of **line-by-line unified diffs** against puppeteer-core's compiled output. Any upstream puppeteer-core release can add/remove lines near a hunk and make the patch stop applying — even patch-level releases. For example, `rebrowser-patches@1.0.19` was cut against puppeteer-core 24.40.x, and newer puppeteer-core (24.41+) adds fields to `IsolatedWorld.js` that break hunks (see [issue #4](https://github.com/liqi0816/chrome-devtools-mcp-rebrowser/issues/4)). Conversely, a newer `rebrowser-patches` release could target a different puppeteer-core line layout and stop applying to 24.40.0.
+
+Both pins are bumped together whenever a new `rebrowser-patches` release catches up to a newer puppeteer-core. The remaining dependencies (`chrome-devtools-mcp`, `diff`) still float on `^` ranges because their APIs are stable and the patches we apply use fuzzy matching.
 
 ## Flags
 
@@ -187,20 +194,17 @@ This is an acceptable tradeoff since `Runtime.enable` is the primary CDP detecti
 - Check that `DevToolsActivePort` file exists in Chrome's user data directory
 
 ### Patch fails with "FAILED" hunks
-- If CJS/ESM hunks fail, the puppeteer-core version may have changed too much. Try adjusting the `--fuzz` value or manually applying the changes
+- The installed `puppeteer-core` version drifted past what `rebrowser-patches` knows how to patch. `postinstall.mjs` prints the exact installed versions and a link to [issue #4](https://github.com/liqi0816/chrome-devtools-mcp-rebrowser/issues/4) when this happens. Re-run with `npx -y @liqi0816/chrome-devtools-mcp-rebrowser@latest` — the pinned `puppeteer-core` and `rebrowser-patches` in `package.json` should keep the install reproducible.
 
 ### "emulateFocusedPage is not a function" (or similar)
-- Version mismatch: ensure `puppeteer-core` in `package.json` matches the version in `chrome-devtools-mcp`'s `devDependencies` (currently `24.39.1`)
-
-### Postinstall fails — "`patch` command not found"
-- On Linux/macOS: `patch` is usually pre-installed. If not: `sudo apt install patch` or `brew install gpatch`.
-- On Windows: Install [Git for Windows](https://gitforwindows.org/) — it bundles `patch.exe` at `C:\Program Files\Git\usr\bin\patch.exe`. Make sure it's on your PATH.
+- Version mismatch: ensure `puppeteer-core` in `package.json` is a version whose API is supported by the bundled Puppeteer inside `chrome-devtools-mcp` (see the Version Compatibility table below).
 
 ## Version Compatibility
 
-| Package | Version |
-|---------|---------|
-| chrome-devtools-mcp | 0.20.3 |
-| puppeteer-core | 24.39.1 |
-| rebrowser-patches | 1.0.19 |
-| Node.js | ≥ 20.19.0 |
+| Package | Version | Pinned? |
+|---------|---------|---------|
+| chrome-devtools-mcp | ^0.22.0 | floats (fuzzy patch) |
+| puppeteer-core | 24.40.0 | **exact** ([why](#why-puppeteer-core-and-rebrowser-patches-are-pinned-to-exact-versions)) |
+| rebrowser-patches | 1.0.19 | **exact** ([why](#why-puppeteer-core-and-rebrowser-patches-are-pinned-to-exact-versions)) |
+| diff | ^8.0.4 | floats |
+| Node.js | ≥ 20.19.0 | — |

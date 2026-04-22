@@ -134,6 +134,52 @@ async function applyMultiPatch(targetDir, patchContent, { maxFuzz , filter } = {
 // Main
 // ---------------------------------------------------------------------------
 
+/**
+ * Read the installed version of a package, or 'unknown' if it can't be resolved.
+ * @param {string} packageName
+ */
+function pkgVersion(packageName) {
+  try { return require(`${packageName}/package.json`).version; }
+  catch { return 'unknown'; }
+}
+
+/**
+ * Print a big, impossible-to-miss error block with diagnostic info and a link to
+ * the known-compatibility issue. Tuned specifically for issue #4: a
+ * `puppeteer-core` / `rebrowser-patches` version mismatch silently produces an
+ * unpatchable install. Both are now pinned exact in package.json, so this path
+ * should only fire if a user has overridden the pins or is running from a fork.
+ *
+ * @param {string} stage — human-readable stage name that failed
+ * @param {string[]} failed — list of patch target files that did not apply
+ * @param {Record<string, string>} versions — installed versions for context
+ */
+function printPatchFailureReport(stage, failed, versions) {
+  const lines = [
+    '',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    `✘ chrome-devtools-mcp-rebrowser postinstall: ${stage} FAILED`,
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+    'The following patch targets could not be applied:',
+    ...failed.map(f => `  • ${f}`),
+    '',
+    'Installed versions:',
+    ...Object.entries(versions).map(([k, v]) => `  • ${k}: ${v}`),
+    '',
+    'This usually means one of the patched dependencies was upgraded past',
+    'what rebrowser-patches knows how to handle. See:',
+    '  https://github.com/liqi0816/chrome-devtools-mcp-rebrowser/issues/4',
+    '',
+    'Quickest workaround: pin the known-good versions locally, e.g.',
+    '  npx -y @liqi0816/chrome-devtools-mcp-rebrowser@1.0.3',
+    '(or whatever the latest published version is).',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+  ];
+  console.error(lines.join('\n'));
+}
+
 async function main() {
   console.log('\n🔧 chrome-devtools-mcp-rebrowser: postinstall\n');
 
@@ -143,6 +189,14 @@ async function main() {
   const ownDir = resolve(
     dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
   );
+
+  const versions = {
+    'puppeteer-core': pkgVersion('puppeteer-core'),
+    'rebrowser-patches': pkgVersion('rebrowser-patches'),
+    'chrome-devtools-mcp': pkgVersion('chrome-devtools-mcp'),
+  };
+  console.log('Installed:', Object.entries(versions).map(([k, v]) => `${k}@${v}`).join(', '));
+  console.log('');
 
   // 1. Apply rebrowser-patches to puppeteer-core
   console.log('--- Applying rebrowser-patches to puppeteer-core ---');
@@ -154,7 +208,10 @@ async function main() {
     filter: ({ oldFileName }) => !oldFileName.startsWith('a/lib/es5-iife')
   });
   console.log(`  ✔ ${r1.applied} applied, ${r1.skipped} skipped`);
-  if (r1.failed.length) throw new Error(`✘ Failed: ${r1.failed.join(', ')}`);
+  if (r1.failed.length) {
+    printPatchFailureReport('rebrowser-patches → puppeteer-core', r1.failed, versions);
+    throw new Error(`Failed patches: ${r1.failed.join(', ')}`);
+  }
 
   // 2. Apply DevToolsConnectionAdapter patch to chrome-devtools-mcp
   console.log('--- Applying DevToolsConnectionAdapter patch ---');
@@ -163,7 +220,10 @@ async function main() {
   );
   const r2 = await applyMultiPatch(chromeDevtoolsMcpDir, adapterPatch, { maxFuzz: 2 });
   console.log(`  ✔ ${r2.applied} applied, ${r2.skipped} skipped`);
-  if (r2.failed.length) throw new Error(`✘ Failed: ${r2.failed.join(', ')}`);
+  if (r2.failed.length) {
+    printPatchFailureReport('DevToolsConnectionAdapter patch → chrome-devtools-mcp', r2.failed, versions);
+    throw new Error(`Failed patches: ${r2.failed.join(', ')}`);
+  }
 
   console.log('\n✅ All patches applied. Ready to use!\n');
 }
