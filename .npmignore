@@ -1,6 +1,7 @@
 # Development / test files
 cdp-alert.mjs
 package-lock.json
+smoke-test.mjs
 
 # Git
 .git/

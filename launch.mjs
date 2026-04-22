@@ -8,7 +8,8 @@ const require = createRequire(import.meta.url);
 // ---------------------------------------------------------------------------
 // Step 1: Import the patched puppeteer-core
 // ---------------------------------------------------------------------------
-// This is puppeteer-core@24.39.1 with rebrowser-patches applied in-place.
+// This is puppeteer-core (pinned in package.json — currently 24.40.0) with
+// rebrowser-patches applied in-place by postinstall.mjs.
 // The patches disable Runtime.Enable (the primary CDP detection vector),
 // change sourceURL from pptr:... to app.js, and rename the utility world.
 import puppeteerCore from 'puppeteer-core';

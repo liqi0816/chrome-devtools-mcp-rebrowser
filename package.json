@@ -1,6 +1,6 @@
 {
   "name": "@liqi0816/chrome-devtools-mcp-rebrowser",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Chrome DevTools MCP server with rebrowser anti-detection patches — undetectable by Cloudflare, DataDome, and other anti-bot systems",
   "keywords": [
     "mcp",
@@ -35,13 +35,15 @@
   ],
   "scripts": {
     "postinstall": "node postinstall.mjs",
-    "start": "node launch.mjs"
+    "start": "node launch.mjs",
+    "smoke-test": "node smoke-test.mjs",
+    "prepublishOnly": "npm run smoke-test"
   },
   "dependencies": {
-    "chrome-devtools-mcp": "^0.20.3",
+    "chrome-devtools-mcp": "^0.22.0",
     "diff": "^8.0.4",
-    "puppeteer-core": "^24.40.0",
-    "rebrowser-patches": "^1.0.19"
+    "puppeteer-core": "24.40.0",
+    "rebrowser-patches": "1.0.19"
   },
   "publishConfig": {
     "access": "public"
