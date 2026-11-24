@@ -16,6 +16,10 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { parsePatch, applyPatch } from 'diff';
+// rebrowser-patches >= 1.1 ships one patch set per upstream version under
+// patches/<package>/<version>/; reuse its own selection logic (exact match →
+// newest same major.minor → newest overall) so we stay in sync with its CLI.
+import { resolvePatchVersion } from 'rebrowser-patches/scripts/utils/index.js';
 
 const require = createRequire(import.meta.url);
 
@@ -87,14 +91,14 @@ function applyWithFuzz(source, filePatch, maxFuzz = 10) {
  * Apply a multi-file unified patch to a target directory.
  * Handles new files (/dev/null → b/path) and skips already-patched files.
  * @param {string} targetDir — absolute path to the package root
- * @param {string} patchContent — raw unified diff string
+ * @param {string | import('diff').StructuredPatch[]} patchContent — raw unified diff string, or already-parsed file patches
  * @param {object} [options]
  * @param {number} [options.maxFuzz] — maximum fuzz factor passed to applyWithFuzz
  * @param {(fp: import('diff').StructuredPatch) => boolean} [options.filter] — predicate to select file patches
  * @returns {Promise<{applied: number, skipped: number, failed: string[]}>}
  */
 async function applyMultiPatch(targetDir, patchContent, { maxFuzz , filter } = {}) {
-  let filePatches = parsePatch(patchContent);
+  let filePatches = typeof patchContent === 'string' ? parsePatch(patchContent) : patchContent;
   if (filter) filePatches = filePatches.filter(filter);
 
   const stats = { applied: 0, skipped: 0, failed: [] };
@@ -172,7 +176,7 @@ function printPatchFailureReport(stage, failed, versions) {
     '  https://github.com/liqi0816/chrome-devtools-mcp-rebrowser/issues/4',
     '',
     'Quickest workaround: pin the known-good versions locally, e.g.',
-    '  npx -y @liqi0816/chrome-devtools-mcp-rebrowser@1.0.3',
+    '  npx -y @liqi0816/chrome-devtools-mcp-rebrowser@1.0.4',
     '(or whatever the latest published version is).',
     '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     '',
@@ -184,7 +188,6 @@ async function main() {
   console.log('\n🔧 chrome-devtools-mcp-rebrowser: postinstall\n');
 
   const puppeteerCoreDir = pkgDir('puppeteer-core');
-  const rebrowserPatchesDir = pkgDir('rebrowser-patches');
   const chromeDevtoolsMcpDir = pkgDir('chrome-devtools-mcp');
   const ownDir = resolve(
     dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1')),
@@ -200,29 +203,68 @@ async function main() {
 
   // 1. Apply rebrowser-patches to puppeteer-core
   console.log('--- Applying rebrowser-patches to puppeteer-core ---');
-  const rebrowserPatch = await readFile(
-    join(rebrowserPatchesDir, 'patches', 'puppeteer-core', 'lib.patch'), 'utf8',
-  );
-  const r1 = await applyMultiPatch(puppeteerCoreDir, rebrowserPatch, {
-    maxFuzz: 10,
-    filter: ({ oldFileName }) => !oldFileName.startsWith('a/lib/es5-iife')
-  });
+  const resolved = resolvePatchVersion('puppeteer-core', versions['puppeteer-core'], 'lib');
+  if (!resolved) {
+    printPatchFailureReport('rebrowser-patches → puppeteer-core', ['(no lib.patch shipped for puppeteer-core)'], versions);
+    throw new Error('No rebrowser-patches lib.patch found for puppeteer-core');
+  }
+  console.log(`  Using rebrowser patch set ${resolved.version}` +
+    (resolved.exact ? '' : ` (closest match; not tested upstream on ${versions['puppeteer-core']})`));
+  const rebrowserPatch = await readFile(resolved.path, 'utf8');
+
+  // Local per-file overrides for puppeteer-core versions newer than what
+  // rebrowser-patches has tested: patches/puppeteer-core/<version>/lib.patch.
+  // A file listed there replaces the upstream hunk for that same file.
+  let overridePatches = [];
+  try {
+    overridePatches = parsePatch(await readFile(
+      join(ownDir, 'patches', 'puppeteer-core', versions['puppeteer-core'], 'lib.patch'), 'utf8',
+    ));
+    console.log(`  Local overrides: ${overridePatches.map(fp => fp.oldFileName.slice(2)).join(', ')}`);
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const overridden = new Set(overridePatches.map(fp => fp.oldFileName));
+  const upstreamPatches = parsePatch(rebrowserPatch)
+    .filter(({ oldFileName }) => !oldFileName.startsWith('a/lib/es5-iife') && !overridden.has(oldFileName));
+
+  const r1 = await applyMultiPatch(puppeteerCoreDir, [...upstreamPatches, ...overridePatches], { maxFuzz: 10 });
   console.log(`  ✔ ${r1.applied} applied, ${r1.skipped} skipped`);
   if (r1.failed.length) {
     printPatchFailureReport('rebrowser-patches → puppeteer-core', r1.failed, versions);
     throw new Error(`Failed patches: ${r1.failed.join(', ')}`);
   }
 
-  // 2. Apply DevToolsConnectionAdapter patch to chrome-devtools-mcp
+  // 2. Block Runtime.enable in chrome-devtools-mcp's DevToolsConnectionAdapter.
+  // Since chrome-devtools-mcp 1.x the adapter is bundled (minified, on a single
+  // ~900 KB line) into third_party/browser.js, so a unified diff is impractical.
+  // Instead, anchor on the adapter's send() signature + its unique error string
+  // and inject the guard using whatever parameter names the minifier chose.
   console.log('--- Applying DevToolsConnectionAdapter patch ---');
-  const adapterPatch = await readFile(
-    join(ownDir, 'patches', 'chrome-devtools-mcp', 'DevToolsConnectionAdapter.js.patch'), 'utf8',
-  );
-  const r2 = await applyMultiPatch(chromeDevtoolsMcpDir, adapterPatch, { maxFuzz: 2 });
-  console.log(`  ✔ ${r2.applied} applied, ${r2.skipped} skipped`);
-  if (r2.failed.length) {
-    printPatchFailureReport('DevToolsConnectionAdapter patch → chrome-devtools-mcp', r2.failed, versions);
-    throw new Error(`Failed patches: ${r2.failed.join(', ')}`);
+  const adapterRel = join('out', 'Default', 'gen', 'src', 'third_party', 'browser.js');
+  const adapterPath = join(chromeDevtoolsMcpDir, adapterRel);
+  const adapterSrc = await readFile(adapterPath, 'utf8');
+  const MARKER = '/*rebrowser-patches:DevToolsConnectionAdapter*/';
+  if (adapterSrc.includes(MARKER)) {
+    console.log('  ✔ 0 applied, 1 skipped');
+  } else {
+    const anchor = /send\(([\w$]+),([\w$]+),([\w$]+)\)\{if\(\3===void 0\)throw new Error\("Attempting to send on the root session\. This must not happen"\);/g;
+    const matches = [...adapterSrc.matchAll(anchor)];
+    if (matches.length !== 1) {
+      printPatchFailureReport('DevToolsConnectionAdapter patch → chrome-devtools-mcp',
+        [`${adapterRel} (expected 1 anchor match, found ${matches.length})`], versions);
+      throw new Error(`Failed patches: ${adapterRel}`);
+    }
+    const [m, method, , sessionId] = matches[0];
+    // The DevTools Universe models call Runtime.enable on their own CDP session,
+    // which leaks as a detectable CDP marker. Suppress it here just like
+    // rebrowser-patches suppresses it inside Puppeteer's FrameManager.
+    const guard = `${MARKER}if(${method}==="Runtime.enable"&&process.env.REBROWSER_PATCHES_RUNTIME_FIX_MODE!=="0"){` +
+      `process.env.REBROWSER_PATCHES_DEBUG&&console.error("[rebrowser-patches][DevToolsConnection] Blocked Runtime.enable on session",${sessionId});` +
+      `return Promise.resolve({result:{}})}`;
+    const idx = matches[0].index + m.length;
+    await writeFile(adapterPath, adapterSrc.slice(0, idx) + guard + adapterSrc.slice(idx));
+    console.log('  ✔ 1 applied, 0 skipped');
   }
 
   console.log('\n✅ All patches applied. Ready to use!\n');

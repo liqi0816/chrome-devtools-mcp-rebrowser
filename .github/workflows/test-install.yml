@@ -26,20 +26,20 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const puppeteerCore = path.dirname(require.resolve('puppeteer-core/package.json'));
-          const browser = fs.readFileSync(path.join(puppeteerCore, 'lib/cjs/puppeteer/cdp/Browser.js'), 'utf8');
+          const browser = fs.readFileSync(path.join(puppeteerCore, 'lib/puppeteer/cdp/Browser.js'), 'utf8');
           if (!browser.includes('_connection()')) {
             console.error('Browser.js missing _connection() patch');
             process.exit(1);
           }
-          const execCtx = fs.readFileSync(path.join(puppeteerCore, 'lib/cjs/puppeteer/cdp/ExecutionContext.js'), 'utf8');
+          const execCtx = fs.readFileSync(path.join(puppeteerCore, 'lib/puppeteer/cdp/ExecutionContext.js'), 'utf8');
           if (!execCtx.includes('rebrowser')) {
             console.error('ExecutionContext.js missing rebrowser patch');
             process.exit(1);
           }
           const cdmDir = path.dirname(require.resolve('chrome-devtools-mcp/package.json'));
-          const adapter = fs.readFileSync(path.join(cdmDir, 'build/src/DevToolsConnectionAdapter.js'), 'utf8');
-          if (!adapter.includes('Runtime.enable')) {
-            console.error('DevToolsConnectionAdapter.js missing Runtime.enable patch');
+          const adapter = fs.readFileSync(path.join(cdmDir, 'out/Default/gen/src/third_party/browser.js'), 'utf8');
+          if (!adapter.includes('/*rebrowser-patches:DevToolsConnectionAdapter*/')) {
+            console.error('third_party/browser.js missing DevToolsConnectionAdapter Runtime.enable guard');
             process.exit(1);
           }
           console.log('All patches verified successfully');

@@ -1,0 +1,121 @@
+--- a/lib/puppeteer/cdp/WebWorker.js
++++ b/lib/puppeteer/cdp/WebWorker.js
+@@ -92,6 +92,10 @@
+         this.#world = new IsolatedWorld(this, new TimeoutSettings(), MAIN_WORLD, logger);
+         this.#emitter = new EventEmitter(undefined, logger);
+         this.#client.once('Runtime.executionContextCreated', async (event) => {
++            if (process.env['REBROWSER_PATCHES_RUNTIME_FIX_MODE'] !== '0') {
++                // rebrowser-patches: ignore default logic
++                return;
++            }
+             this.#world.setContext(new ExecutionContext(client, event.context, this.#world, logger));
+         });
+         this.#client.once('Inspector.workerScriptLoaded', () => {
+@@ -145,9 +149,24 @@
+         // registers a later Disconnected listener that stops forwarding, so the
+         // opposite order would drop those RequestFailed events.
+         this.#forwardNetworkEvents(netManager);
+-        this.#client.send('Runtime.enable').catch((err) => {
+-            return this.#logger?.(DEBUG_PREFIXES.error)?.(err);
+-        });
++        if (process.env['REBROWSER_PATCHES_RUNTIME_FIX_MODE'] !== '0') {
++            // @ts-ignore
++            process.env['REBROWSER_PATCHES_DEBUG'] && console.log('[rebrowser-patches][WebWorker] initialize', this.#targetType, this.#id);
++            // rebrowser-patches: manually create context
++            const contextPayload = {
++                id: -3,
++                auxData: {
++                    frameId: this.#id,
++                }
++            };
++            // @ts-ignore
++            this.#world.setContext(new ExecutionContext(client, contextPayload, this.#world, this.#logger));
++        }
++        else {
++            this.#client.send('Runtime.enable').catch((err) => {
++                return this.#logger?.(DEBUG_PREFIXES.error)?.(err);
++            });
++        }
+     }
+     /**
+      * Network manager for workers that are not owned by a page (service and
+--- a/lib/puppeteer/cdp/utils.js
++++ b/lib/puppeteer/cdp/utils.js
+@@ -239,6 +239,9 @@
+ /**
+  * @internal
+  */
++// rebrowser-patches: without Runtime.enable, Chrome drops CDP bindings when the page navigates
++// (crbug.com/382473087). The binding is added again when the navigation commits, so a call made before that
++// waits for it instead of throwing. This function is serialized into the page: keep comments out of its body.
+ export function addPageBinding(type, name, prefix) {
+     // Depending on the frame loading state either Runtime.evaluate or
+     // Page.addScriptToEvaluateOnNewDocument might succeed. Let's check that we
+@@ -259,7 +262,7 @@
+             const seq = (callPuppeteer.lastSeq ?? 0) + 1;
+             callPuppeteer.lastSeq = seq;
+             callPuppeteer.args.set(seq, args);
+-            callPuppeteer(JSON.stringify({
++            const payload = JSON.stringify({
+                 type,
+                 name,
+                 seq,
+@@ -267,7 +270,26 @@
+                 isTrivial: !args.some(value => {
+                     return value instanceof Node;
+                 }),
+-            }));
++            });
++            const send = (tries) => {
++                // @ts-expect-error: In a different context.
++                // Needs to be the same as CDP_BINDING_PREFIX.
++                const cdpBinding = globalThis[prefix + name];
++                if (typeof cdpBinding === 'function') {
++                    cdpBinding(payload);
++                }
++                else if (tries < 500) {
++                    setTimeout(() => {
++                        return send(tries + 1);
++                    }, 10);
++                }
++                else {
++                    callPuppeteer.callbacks
++                        .get(seq)
++                        ?.reject(new Error(`binding ${name} is not available`));
++                }
++            };
++            send(0);
+             return new Promise((resolve, reject) => {
+                 callPuppeteer.callbacks.set(seq, {
+                     resolve(value) {
+--- a/lib/puppeteer/cdp/Page.js
++++ b/lib/puppeteer/cdp/Page.js
+@@ -302,6 +302,7 @@
+         clientEmitter.on('Inspector.targetCrashed', this.#onTargetCrashed.bind(this));
+         clientEmitter.on('Performance.metrics', this.#emitMetrics.bind(this));
+         clientEmitter.on('Log.entryAdded', this.#onLogEntryAdded.bind(this));
++        clientEmitter.on('Console.messageAdded', this.#onConsoleMessageAdded.bind(this));
+         clientEmitter.on('Page.fileChooserOpened', this.#onFileChooser.bind(this));
+     }
+     #onDetachedFromTarget = (target) => {
+@@ -353,6 +354,7 @@
+                 this.#frameManager.initialize(this.#primaryTargetClient),
+                 this.#primaryTargetClient.send('Performance.enable'),
+                 this.#primaryTargetClient.send('Log.enable'),
++                process.env['REBROWSER_PATCHES_RUNTIME_FIX_MODE'] !== '0' && this.#primaryTargetClient.send('Console.enable'),
+                 this.#webmcp.initialize(),
+             ]);
+         }
+@@ -514,6 +516,12 @@
+     #onTargetCrashed() {
+         this.emit("error" /* PageEvent.Error */, new Error('Page crashed!'));
+     }
++    #onConsoleMessageAdded(event) {
++        // rebrowser-patches: Runtime.consoleAPICalled needs Runtime.enable, so console.* output is
++        // read from the legacy Console domain instead (text only, no argument handles).
++        const { level, text, url, line, column } = event.message;
++        this.#emitConsoleMessage(new ConsoleMessage(convertConsoleMessageLevel(level), text, [], [{ url, lineNumber: line === undefined ? undefined : line - 1, columnNumber: column === undefined ? undefined : column - 1 }], undefined, undefined, this.#primaryTarget._targetId, undefined));
++    }
+     #onLogEntryAdded(event) {
+         const { level, text, args, source, url, lineNumber, stackTrace } = event.entry;
+         if (args) {
